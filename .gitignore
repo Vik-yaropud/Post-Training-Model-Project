@@ -228,3 +228,8 @@ __marimo__/
 
 # Data
 data/
+
+# Unsloth / training outputs
+unsloth_compiled_cache/
+outputs/
+*.gguf
