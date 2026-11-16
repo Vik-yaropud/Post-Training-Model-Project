@@ -1,5 +1,7 @@
 from unsloth import FastLanguageModel
 from datasets import load_dataset
+from trl import SFTTrainer, SFTConfig
+from unsloth.chat_templates import train_on_responses_only
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name = "unsloth/Qwen2.5-1.5B-Instruct",
@@ -24,4 +26,34 @@ def to_text(row):
     return {"text": tokenizer.apply_chat_template(messages, tokenize=False)}
 
 ds = ds.map(to_text)
-print(ds["train"][0]["text"])
+
+trainer = SFTTrainer(
+    model = model,
+    processing_class = tokenizer,
+    train_dataset = ds["train"],
+    eval_dataset = ds["validation"],
+    args = SFTConfig(
+        dataset_text_field = "text",
+        max_length = 512,
+        per_device_train_batch_size = 8,
+        num_train_epochs = 1,
+        learning_rate = 2e-4,
+        logging_steps = 10,
+        eval_strategy = "steps",
+        eval_steps = 50,
+        output_dir = "outputs",
+        seed = 42,
+        report_to = "none"
+    )
+)
+
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part = "<|im_start|>user\n",
+    response_part = "<|im_start|>assistant\n",
+)
+
+trainer.train()
+
+model.save_pretrained("outputs/lora")
+tokenizer.save_pretrained("outputs/lora")
