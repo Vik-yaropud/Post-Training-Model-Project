@@ -3,6 +3,8 @@ import pandas as pd
 
 test = pd.read_json("data/overruling/test.jsonl", orient="records", lines=True)
 
+MODEL = "qwen-overruling"
+
 predictions = []
 responses = []
 labels = []
@@ -16,7 +18,7 @@ F1 = 0
 def ask(prompt: str) -> str:
     resp = requests.post(
         "http://127.0.0.1:11434/api/chat",
-        json={"messages": [{"role": "user", "content": prompt}], "model": "qwen2.5:1.5b", "stream": False, "options": {"temperature": 0, "num_predict": 5}},
+        json={"messages": [{"role": "user", "content": prompt}], "model": MODEL, "stream": False, "options": {"temperature": 0, "num_predict": 5}},
         timeout=60)
     data = resp.json()
     answer = data["message"]["content"]
