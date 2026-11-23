@@ -2,9 +2,10 @@ import requests
 import pandas as pd
 from prompts import build_prompt
 
-test = pd.read_json("data/overruling/test.jsonl", orient="records", lines=True)
-
 MODEL = "qwen-overruling"
+SPLIT = "val"
+
+df = pd.read_json(f"data/overruling/{SPLIT}.jsonl", orient="records", lines=True)
 
 predictions = []
 responses = []
@@ -34,9 +35,9 @@ def parse_answer(answer: str) -> str:
     else:
         return "Invalid"
 
-for i in range(len(test)):
-    sentence = test.iloc[i]["text"]
-    real_answer = test.iloc[i]["answer"]
+for i in range(len(df)):
+    sentence = df.iloc[i]["text"]
+    real_answer = df.iloc[i]["answer"]
     prompt = build_prompt(sentence)
     answer = ask(prompt)
     labels.append(real_answer)
@@ -58,7 +59,7 @@ for i in range(len(test)):
             fp += 1
 
 
-accuracy = count_matches/len(test)
+accuracy = count_matches/len(df)
 if tp+fp != 0:
     precision = tp/(tp+fp)
 if tp+fn != 0:

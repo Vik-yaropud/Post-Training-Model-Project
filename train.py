@@ -3,6 +3,8 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 from unsloth.chat_templates import train_on_responses_only
 
+FRACTION = 0.5
+
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name = "unsloth/Qwen2.5-1.5B-Instruct",
     max_seq_length = 512,
@@ -20,6 +22,9 @@ model = FastLanguageModel.get_peft_model(
 )
 
 ds = load_dataset("json", data_files={"train": "data/overruling/train_chat.jsonl", "validation": "data/overruling/val_chat.jsonl"})
+
+n = int(len(ds["train"])*FRACTION)
+ds["train"] = ds["train"].select(range(n))
 
 def to_text(row):
     messages = row["messages"]
@@ -41,7 +46,7 @@ trainer = SFTTrainer(
         logging_steps = 10,
         eval_strategy = "steps",
         eval_steps = 50,
-        output_dir = "outputs",
+        output_dir = f"outputs/run_{int(FRACTION*100)}",
         seed = 42,
         report_to = "none"
     )
@@ -55,5 +60,5 @@ trainer = train_on_responses_only(
 
 trainer.train()
 
-model.save_pretrained("outputs/lora")
-tokenizer.save_pretrained("outputs/lora")
+model.save_pretrained(f"outputs/lora_{int(FRACTION*100)}")
+tokenizer.save_pretrained(f"outputs/lora_{int(FRACTION*100)}")
