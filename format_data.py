@@ -1,4 +1,5 @@
 import pandas as pd
+from prompts import build_prompt
 
 train = pd.read_json("data/overruling/train.jsonl", orient="records", lines=True)
 val = pd.read_json("data/overruling/val.jsonl", orient="records", lines=True)

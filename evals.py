@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+from prompts import build_prompt
 
 test = pd.read_json("data/overruling/test.jsonl", orient="records", lines=True)
 
@@ -36,7 +37,7 @@ def parse_answer(answer: str) -> str:
 for i in range(len(test)):
     sentence = test.iloc[i]["text"]
     real_answer = test.iloc[i]["answer"]
-    prompt = f"Does the sentence:\"{sentence}\" overrule a previous court case? One word answer: Yes or No"
+    prompt = build_prompt(sentence)
     answer = ask(prompt)
     labels.append(real_answer)
     responses.append(answer)
