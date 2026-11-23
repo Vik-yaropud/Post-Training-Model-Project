@@ -1,6 +1,6 @@
 from unsloth import FastLanguageModel
 
-FRACTION = 0.5
+FRACTION = 1.0
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name = f"outputs/lora_{int(FRACTION*100)}",

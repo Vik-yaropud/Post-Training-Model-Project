@@ -20,6 +20,19 @@ The base model was cautious. It rarely raised false alarms but missed about a th
 
 Of the 10 remaining errors, 4 trace back to the data (annotator notes, cut-off sentences, a broader definition of overruling than the prompt). Full results, training details and error analysis are in [NOTES.md](NOTES.md).
 
+## How much data does it need?
+
+Same setup, trained on 25%, 50% and 100% of the training set, scored on the 240-sentence validation set:
+
+| Training examples | Accuracy | Precision | Recall | F1 | Misses | False alarms |
+|---|---|---|---|---|---|---|
+| 0 (base model) | 83.3% | 92.1% | 74.4% | 82.3% | 32 | 8 |
+| 418 (25%) | 93.3% | 93.6% | 93.6% | 93.6% | 8 | 8 |
+| 837 (50%) | 96.2% | 99.2% | 93.6% | 96.3% | 8 | 1 |
+| 1,675 (100%) | 96.7% | 97.6% | 96.0% | 96.8% | 5 | 3 |
+
+The first 418 examples (33 seconds of training) fix most of the misses. The next 419 fix most of the false alarms. After that, the curve is flat: the difference between 50% and 100% is one sentence, within noise for a 240-row set. More data of the same kind is unlikely to help, and the remaining errors point to label quality instead.
+
 ## How it works
 
 1. **Data:** LegalBench `overruling` sentences, split 70/10/20 into train/val/test with a fixed seed.
@@ -30,11 +43,12 @@ Of the 10 remaining errors, 4 trace back to the data (annotator notes, cut-off s
 
 | Script | Runs on | Purpose |
 |---|---|---|
+| `prompts.py` | Both | The single shared prompt, used by training and eval |
 | `prepare_data.py` | Windows or WSL | Download, clean and split the data |
-| `evals.py` | Windows | Score a model in Ollama on the test set |
+| `evals.py` | Windows | Score a model in Ollama on a split (`MODEL`, `SPLIT` at the top) |
 | `format_data.py` | WSL | Turn train/val into chat-format training files |
-| `train.py` | WSL | LoRA fine-tune with Unsloth |
-| `export.py` | WSL | Merge the adapter and export a 4-bit GGUF |
+| `train.py` | WSL | LoRA fine-tune with Unsloth on a share of the training set (`FRACTION`) |
+| `export.py` | WSL | Merge the adapter and export a 4-bit GGUF (same `FRACTION`) |
 
 ## Running it
 
@@ -49,7 +63,7 @@ pip install -r requirements.txt
 ollama pull qwen2.5:1.5b
 
 python prepare_data.py   # download and split the data
-python evals.py          # score the model set in MODEL on the test set
+python evals.py          # score MODEL on SPLIT (both set at the top of evals.py)
 ```
 
 **Fine-tune (WSL)**
@@ -60,9 +74,11 @@ uv pip install unsloth --torch-backend=auto
 
 python prepare_data.py   # same split as on Windows
 python format_data.py    # build chat-format training files
-python train.py          # LoRA adapter -> outputs/lora
-python export.py         # 4-bit GGUF -> outputs/gguf_gguf/
+python train.py          # LoRA adapter -> outputs/lora_100
+python export.py         # 4-bit GGUF -> outputs/gguf_100_gguf/
 ```
+
+Set `FRACTION` to the same value at the top of both `train.py` and `export.py` (`1.0` = full training set; `0.25` or `0.5` for the learning curve). Folder names follow it, so runs never overwrite each other.
 
 **Load the fine-tuned model into Ollama (Windows)**
 

@@ -3,7 +3,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 from unsloth.chat_templates import train_on_responses_only
 
-FRACTION = 0.5
+FRACTION = 1.0
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name = "unsloth/Qwen2.5-1.5B-Instruct",
