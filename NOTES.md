@@ -354,9 +354,3 @@ One row per run. Use **val** for comparing options; use **test** only for the ba
 - [x] Move the prompt into a shared `prompts.py` (verified byte-identical with `cmp`)
 - [x] Learning-curve experiment: 0 / 25% / 50% / 100% of train, scored on val
 - [x] Update README with the fine-tuned results
-
-**Next**
-- [ ] Add the learning curve to the README
-- [ ] Count annotator-note rows (`##` and `note:`) with a keyword script
-- [ ] Make the repo public
-- [ ] Update the resume with the final results
