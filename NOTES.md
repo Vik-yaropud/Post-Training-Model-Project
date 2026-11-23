@@ -14,12 +14,13 @@ Working log for fine-tuning a small open model on a legal classification task. N
 
 **Data source:** [LegalBench](https://huggingface.co/datasets/nguha/legalbench) (`nguha/legalbench`, file `data/overruling/test.tsv`). Original sentences come from the CaseHOLD dataset (Zheng et al., 2021), licensed CC BY 4.0. Data is downloaded by script and not committed to the repo.
 
-**Headline result:** fine-tuning raised test accuracy from **78.5% to 97.9%** and recall from **66.1% to 97.0%**. Errors dropped from 103 to 10 out of 479.
+**Headline result:** fine-tuning raised test accuracy from **78.5% to 97.9%** and recall from **66.1% to 97.0%**. Errors dropped from 103 to 10 out of 479. A learning-curve experiment showed most of the gain comes from the first ~400 training examples, and accuracy levels off around ~800.
 
 **Scripts**
 
 | File | Purpose | Runs on |
 |---|---|---|
+| `prompts.py` | The single shared copy of the prompt (`build_prompt`) | Imported by both sides |
 | `prepare_data.py` | Download, clean, and split the data | Windows or WSL |
 | `evals.py` | Score a model in Ollama on a split | Windows (Ollama) |
 | `format_data.py` | Turn train/val splits into chat-format training files | WSL |
@@ -64,10 +65,12 @@ xformers is installed but doesn't match this PyTorch version, so Unsloth falls b
 
 ## 4. Evaluation method (`evals.py`)
 
-**Prompt** (must be identical in training data and eval):
+**Prompt** (must be identical in training data and eval), defined once in `prompts.py` as `build_prompt(sentence)`:
 ```
 Does the sentence:"{sentence}" overrule a previous court case? One word answer: Yes or No
 ```
+
+**Settings at the top of the script:** `MODEL` picks the Ollama model to score; `SPLIT` picks the data file (`"test"` or `"val"` → `data/overruling/{SPLIT}.jsonl`).
 
 **Generation settings:** `temperature = 0` (deterministic), `num_predict = 5` (caps reply length), request `timeout = 60` seconds.
 
@@ -152,7 +155,7 @@ The test split is **not** converted. It's only used for evaluation.
 
 **Chat template:** `train.py` converts each conversation to Qwen's text format with `tokenizer.apply_chat_template`. Qwen's template adds a default system message ("You are Qwen, created by Alibaba Cloud. You are a helpful assistant.") when none is given. Ollama's Qwen template adds the same line, so training and evaluation see the same format.
 
-**Known risk:** the prompt is currently written separately in `evals.py` and `format_data.py`. If one changes and the other doesn't, the model is trained on one question and tested on another. Planned fix: move it into a shared `prompts.py`.
+**Shared prompt:** the prompt used to be written separately in `evals.py` and `format_data.py`, so a change to one copy could silently train the model on one question and test it on another. It now lives in `prompts.py`, and both scripts import `build_prompt`. The refactor was verified with `cmp`: `train_chat.jsonl` regenerated after the change is byte-for-byte identical to the file before it.
 
 ---
 
@@ -191,6 +194,9 @@ The test split is **not** converted. It's only used for evaluation.
 | `eval_strategy` / `eval_steps` | every 50 steps |
 | `logging_steps` | 10 |
 | `seed` | 42 |
+| Gradient accumulation | 2 (set automatically by Unsloth), so each step updates on 8 × 2 = **16 examples** |
+
+**`FRACTION` setting:** the share of the training set to use (`1.0` = all 1,675 rows). `train.py` keeps the first `int(len(train) × FRACTION)` rows with `.select(range(n))`. Since the data was shuffled in `prepare_data.py`, the first rows are a random sample, and each smaller run's data is contained in the bigger run's. Output folders are named after the fraction (`outputs/run_25`, `outputs/lora_25`), and `export.py` uses the same `FRACTION` to read the right adapter and write `outputs/gguf_25`. Validation always uses all 240 rows.
 
 **Loss on answers only:** `train_on_responses_only` masks everything before `<|im_start|>assistant\n`. The model reads the full conversation but is only graded on the "Yes"/"No" answer. Without this, about 97% of the loss would come from predicting the prompt text.
 
@@ -207,7 +213,7 @@ The test split is **not** converted. It's only used for evaluation.
 
 **Interpretation**
 - Both losses decreased, and validation loss kept improving through the end of the epoch, with no sign of overfitting.
-- Expected 210 steps (1,675 ÷ 8) but got 105, so each step processed about 16 examples. Unsloth adjusted batching automatically (its log mentions padding-free batching and gradient accumulation). All 1,675 examples were still seen exactly once.
+- Expected 210 steps (1,675 ÷ 8) but got 105. Unsloth set gradient accumulation to 2, so each step processes 16 examples (1,675 ÷ 16 ≈ 105). All 1,675 examples were still seen exactly once.
 - Low loss is not the result. The real comparison is `evals.py` on the test set.
 
 **Output:** LoRA adapters saved to `outputs/lora` (not in Git).
@@ -273,7 +279,32 @@ The test split is **not** converted. It's only used for evaluation.
 
 ---
 
-## 12. Debugging log
+## 12. Learning curve (val)
+
+**Date:** 2026-11-22 · **Question:** how much training data does the improvement actually need?
+
+**Method:** trained two new models on the first 25% and 50% of the training set (`FRACTION = 0.25`, `0.5`), with every other setting identical to run 1. Exported each to Q4_K_M and registered them in Ollama as `qwen-overruling-25` and `qwen-overruling-50` (copies of the run 1 Modelfile with only the `FROM` line changed). Scored all four points on **val** (240), so the test set stays untouched.
+
+| Model | Train examples | Steps | Train time | Val loss | Acc | Prec | Rec | F1 | FN | FP |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `qwen2.5:1.5b` (base) | 0 | | | | 83.3% | 92.1% | 74.4% | 82.3% | 32 | 8 |
+| `qwen-overruling-25` | 418 | 27 | 33 s | 0.0741 | 93.3% | 93.6% | 93.6% | 93.6% | 8 | 8 |
+| `qwen-overruling-50` | 837 | 53 | 55 s | 0.0428 | 96.2% | 99.2% | 93.6% | 96.3% | 8 | 1 |
+| `qwen-overruling` (100%) | 1,675 | 105 | 1 min 43 s | 0.0428 | 96.7% | 97.6% | 96.0% | 96.8% | 5 | 3 |
+
+All runs: 0 Invalid replies.
+
+**Interpretation**
+- **The first 25% gives most of the gain.** Accuracy +10 points, almost entirely from recall (misses 32 → 8). False alarms didn't change.
+- **25% → 50% fixes false alarms** (8 → 1) while recall stays the same. The extra examples taught the model what *isn't* an overruling.
+- **50% → 100% is flat.** 3 fewer misses, 2 more false alarms, one more correct sentence overall. On 240 sentences each sentence is worth 0.4 points, so this is within noise. Val loss agrees: 0.0428 at both 50% and 100%.
+- **Conclusion:** performance levels off around ~800 examples. More data of the same kind is unlikely to help much. Going further would need cleaner labels (section 11: 4 of 10 test errors come from the data) or a different model, not more rows.
+- The 100% model still has the best recall (96.0% vs 93.6%), the metric that matters most here, but the gap is 3 sentences and isn't enough to call it clearly better.
+- The base model scores higher on val (83.3%) than on test (78.5%). With only 240 rows, val happens to be slightly easier. That's why every point on the curve is compared on the same val set.
+
+---
+
+## 13. Debugging log
 
 Problems hit during setup and how they were fixed.
 
@@ -290,10 +321,13 @@ Problems hit during setup and how they were fixed.
 | `.gitignore` merge conflict | Same file edited in both the Windows and WSL copies | Kept one version; now editing only in WSL and pulling before each session |
 | No `.gguf` in `outputs/gguf` after export | Unsloth writes the quantized file to a sibling folder | Found it in `outputs/gguf_gguf/` |
 | `ollama show` / `ollama create`: "timed out waiting for server" | Ollama app wasn't running | Started the Ollama app, reran the command |
+| `git pull` on Windows: "untracked working tree files would be overwritten" (`format_data.py`) | An old, never-committed copy of `format_data.py` sat in the Windows folder | Deleted the Windows copy (the real one was on GitHub), pulled again |
+| `git pull` in WSL: "divergent branches" | An old local notes commit in WSL had never been pushed, while Windows pushed a newer one | Its content was already in the newer file, so `git reset --hard origin/main`; set `git config pull.rebase false` for the future |
+| `ollama create`: "no Modelfile or safetensors files found" | Ran from the repo folder; the Modelfile is in `C:\Users\user\ollama-models` | `cd` to that folder first. `FROM ./...` is also relative to it |
 
 ---
 
-## 13. Experiment log
+## 14. Experiment log
 
 One row per run. Use **val** for comparing options; use **test** only for the baseline and final model.
 
@@ -301,10 +335,14 @@ One row per run. Use **val** for comparing options; use **test** only for the ba
 |---|---|---|---|---|---|---|---|---|
 | 2026-11-08 | qwen2.5:1.5b    | Baseline                   | test  | 78.5% | 87.2% | 66.1% | 75.2% | 0 |
 | 2026-11-21 | qwen-overruling | LoRA r=16, 1 epoch, Q4_K_M | test  | 97.9% | 98.7% | 97.0% | 97.9% | 0 |
+| 2026-11-22 | qwen2.5:1.5b       | Baseline on val            | val   | 83.3% | 92.1% | 74.4% | 82.3% | 0 |
+| 2026-11-22 | qwen-overruling-25 | 25% of train (418)         | val   | 93.3% | 93.6% | 93.6% | 93.6% | 0 |
+| 2026-11-22 | qwen-overruling-50 | 50% of train (837)         | val   | 96.2% | 99.2% | 93.6% | 96.3% | 0 |
+| 2026-11-22 | qwen-overruling    | 100% of train (1,675)      | val   | 96.7% | 97.6% | 96.0% | 96.8% | 0 |
 
 ---
 
-## 14. Next steps
+## 15. Next steps
 
 **Done**
 - [x] Set up WSL2 + Python 3.12 + Unsloth, confirm GPU works inside WSL
@@ -313,10 +351,12 @@ One row per run. Use **val** for comparing options; use **test** only for the ba
 - [x] Export to GGUF with 4-bit (Q4_K_M) quantization, matching the baseline Ollama model
 - [x] Load into Ollama with Qwen's chat template and re-run `evals.py` on test
 - [x] Compare against baseline and re-run error analysis on the fine-tuned model
+- [x] Move the prompt into a shared `prompts.py` (verified byte-identical with `cmp`)
+- [x] Learning-curve experiment: 0 / 25% / 50% / 100% of train, scored on val
+- [x] Update README with the fine-tuned results
 
 **Next**
-- [ ] Learning-curve experiment: train on 25% / 50% / 100% of train, score each on **val**. Shows how much data the gain actually needs. Requires a split option in `evals.py` and a train-fraction option in `train.py`.
-- [ ] Move the prompt into a shared `prompts.py`
+- [ ] Add the learning curve to the README
 - [ ] Count annotator-note rows (`##` and `note:`) with a keyword script
-- [ ] Update README with the final results
 - [ ] Make the repo public
+- [ ] Update the resume with the final results
